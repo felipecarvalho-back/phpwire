@@ -579,24 +579,91 @@ class PhpWire
         return updates;
     }
 
-    function toggleLoading(root, triggerEl, isLoading) {
-        root.querySelectorAll('[wire\\\\:loading]').forEach((el) => {
-            el.style.display = isLoading ? 'inline-block' : 'none';
+    function setLoadingElements(root, selector, visible) {
+        root.querySelectorAll(selector).forEach((el) => {
+            el.style.display = visible ? 'inline-block' : 'none';
         });
+    }
+
+    function setTriggerDisabled(triggerEl, disabled) {
         if (triggerEl && 'disabled' in triggerEl) {
-            triggerEl.disabled = isLoading;
+            triggerEl.disabled = disabled;
         }
     }
 
-    function applyMorph(root, html) {
+    function morphChildrenFallback(fromParent, toParent, preserveActiveInput) {
+        const fromChildren = Array.from(fromParent.childNodes);
+        const toChildren = Array.from(toParent.childNodes);
+        const max = Math.max(fromChildren.length, toChildren.length);
+
+        for (let i = 0; i < max; i++) {
+            const fromChild = fromChildren[i];
+            const toChild = toChildren[i];
+
+            if (!toChild) {
+                fromParent.removeChild(fromChild);
+            } else if (!fromChild) {
+                fromParent.appendChild(toChild.cloneNode(true));
+            } else if (fromChild.nodeType !== toChild.nodeType || fromChild.nodeName !== toChild.nodeName) {
+                fromParent.replaceChild(toChild.cloneNode(true), fromChild);
+            } else if (fromChild.nodeType === Node.TEXT_NODE) {
+                if (fromChild.textContent !== toChild.textContent) {
+                    fromChild.textContent = toChild.textContent;
+                }
+            } else if (fromChild.nodeType === Node.ELEMENT_NODE) {
+                morphElementFallback(fromChild, toChild, preserveActiveInput);
+            }
+        }
+    }
+
+    function morphElementFallback(fromEl, toEl, preserveActiveInput) {
+        for (const attr of Array.from(fromEl.attributes)) {
+            if (!toEl.hasAttribute(attr.name)) {
+                fromEl.removeAttribute(attr.name);
+            }
+        }
+        for (const attr of Array.from(toEl.attributes)) {
+            if (fromEl.getAttribute(attr.name) !== attr.value) {
+                fromEl.setAttribute(attr.name, attr.value);
+            }
+        }
+
+        const isFocusedInput = preserveActiveInput
+            && fromEl === document.activeElement
+            && (fromEl.tagName === 'INPUT' || fromEl.tagName === 'TEXTAREA');
+
+        if (!isFocusedInput && 'value' in fromEl && 'value' in toEl && fromEl.value !== toEl.value) {
+            fromEl.value = toEl.value;
+        }
+
+        morphChildrenFallback(fromEl, toEl, preserveActiveInput);
+    }
+
+    function applyMorph(root, html, preserveActiveInput) {
         if (window.Idiomorph && typeof window.Idiomorph.morph === 'function') {
-            window.Idiomorph.morph(root, html);
+            window.Idiomorph.morph(root, html, {
+                callbacks: {
+                    beforeNodeMorphed: (oldNode, newNode) => {
+                        if (
+                            preserveActiveInput
+                            && oldNode === document.activeElement
+                            && (oldNode.tagName === 'INPUT' || oldNode.tagName === 'TEXTAREA')
+                        ) {
+                            newNode.value = oldNode.value;
+                        }
+                        return true;
+                    }
+                }
+            });
             return;
         }
+
         const tpl = document.createElement('template');
         tpl.innerHTML = html.trim();
         const nextRoot = tpl.content.firstElementChild;
-        if (nextRoot) {
+        if (nextRoot && nextRoot.tagName === root.tagName) {
+            morphElementFallback(root, nextRoot, preserveActiveInput);
+        } else if (nextRoot) {
             root.replaceWith(nextRoot);
         } else {
             root.outerHTML = html;
@@ -604,13 +671,26 @@ class PhpWire
     }
 
     async function sendRequest(root, { action = '', triggerEl = null } = {}) {
+        if (root.dataset.wireBusy === 'true' && action !== '') {
+            return;
+        }
+
         const snapshotRaw = root.getAttribute('wire:snapshot');
         if (!snapshotRaw) return;
 
         const snapshot = JSON.parse(snapshotRaw);
         const updates = collectUpdates(root);
+        let loadingShown = false;
 
-        toggleLoading(root, triggerEl, true);
+        root.dataset.wireBusy = 'true';
+        setLoadingElements(root, '[wire\\\\:loading\\\\.delay\\\\.none]', true);
+
+        const loadingTimer = setTimeout(() => {
+            loadingShown = true;
+            setLoadingElements(root, '[wire\\\\:loading]', true);
+            setTriggerDisabled(triggerEl, true);
+        }, 200);
+
         try {
             const response = await fetch(endpoint, {
                 method: 'POST',
@@ -629,11 +709,17 @@ class PhpWire
 
             const data = await response.json();
             if (data.html) {
-                applyMorph(root, data.html);
+                applyMorph(root, data.html, action === '');
             }
         } finally {
+            clearTimeout(loadingTimer);
             if (document.body.contains(root)) {
-                toggleLoading(root, triggerEl, false);
+                delete root.dataset.wireBusy;
+                setLoadingElements(root, '[wire\\\\:loading\\\\.delay\\\\.none]', false);
+                if (loadingShown) {
+                    setLoadingElements(root, '[wire\\\\:loading]', false);
+                    setTriggerDisabled(triggerEl, false);
+                }
             }
         }
     }

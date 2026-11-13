@@ -56,6 +56,7 @@ wire_init([
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
         }
         .card-header {
+            position: relative;
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
@@ -81,12 +82,16 @@ wire_init([
             font-size: 0.78rem;
         }
         .badge-loading {
+            position: absolute;
+            top: 0;
+            right: 0;
             background: #312e81;
             color: #c7d2fe;
             font-size: 0.72rem;
             padding: 0.2rem 0.55rem;
             border-radius: 999px;
             white-space: nowrap;
+            pointer-events: none;
         }
         .counter-value {
             font-size: 3.5rem;
@@ -126,10 +131,9 @@ wire_init([
             font-weight: 600;
             font-size: 0.88rem;
             cursor: pointer;
-            transition: opacity 0.15s, transform 0.1s;
+            transition: opacity 0.15s, background-color 0.15s;
         }
-        .btn:disabled { opacity: 0.6; cursor: wait; }
-        .btn:active { transform: scale(0.97); }
+        .btn:disabled { opacity: 0.75; cursor: wait; }
         .btn-primary { background: #6366f1; color: #fff; }
         .btn-secondary { background: #334155; color: #f8fafc; }
         .btn-accent { background: #0ea5e9; color: #0f172a; }
